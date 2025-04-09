@@ -10,6 +10,8 @@
 
 ### 💡 Others
 
+- Removed warning about running on Expo Go. This is handled in packages using the Task Manager.
+
 ## 13.1.0 — 2025-04-04
 
 ### 🐛 Bug fixes
