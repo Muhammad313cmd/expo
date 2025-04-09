@@ -1,5 +1,3 @@
-import { getConfig } from '@expo/config';
-import { hasEnabledEdgeToEdge } from '@expo/config-plugins/build/android/EdgeToEdge';
 import fs from 'fs/promises';
 import path from 'path';
 import resolveFrom from 'resolve-from';
@@ -22,6 +20,9 @@ import type {
   RNConfigReactNativeProjectConfig,
   RNConfigResult,
 } from './reactNativeConfig.types';
+import { resolveGradlePropertyAsync } from '../platforms/android';
+
+const EDGE_TO_EDGE_ENABLED_GRADLE_PROPERTY_KEY = 'expo.edgeToEdgeEnabled';
 
 /**
  * Create config for react-native core autolinking.
@@ -38,9 +39,14 @@ export async function createReactNativeConfigAsync({
   };
 
   // For Expo SDK 53 onwards, `react-native-edge-to-edge` is a transitive dependency of every expo project. Unless the user
-  // has also included it as a project dependency, we have to autolink it (transitive non-expo module dependencies are not autolinked).
+  // has also included it as a project dependency, we have to autolink it manually (transitive non-expo module dependencies are not autolinked).
+  // There are two reasons why we don't want to autolink `edge-to-edge` when `edgeToEdge` property is set to `false`:
+  // 1. `react-native-is-edge-to-edge` tries to check if the `edge-to-edge` turbomodule is present to determine whether edge-to-edge is enabled.
+  // 2. `react-native-edge-to-edge` applies edge-to-edge in `onHostResume` and has no property to disable this behavior.
   const shouldAutolinkEdgeToEdge =
-    platform === 'android' && !Object.keys(dependencyRoots).includes('react-native-edge-to-edge');
+    platform === 'android' &&
+    (await resolveGradleEdgeToEdgeEnabled(projectRoot)) &&
+    !Object.keys(dependencyRoots).includes('react-native-edge-to-edge');
 
   if (shouldAutolinkEdgeToEdge) {
     const edgeToEdgeRoot = resolveEdgeToEdgeDependencyRoot(projectRoot);
@@ -92,24 +98,6 @@ export async function findDependencyRootsAsync(
     ...Object.keys(packageJson.dependencies ?? {}),
     ...Object.keys(packageJson.devDependencies ?? {}),
   ];
-  const config = getConfig(projectRoot, {
-    skipSDKVersionRequirement: true,
-  });
-
-  // There are two reasons why we don't want to autolink `edge-to-edge` when `edgeToEdge` property is set to `false`:
-  // 1. `react-native-is-edge-to-edge` tries to check if the `edge-to-edge` turbomodule is present to determine whether edge-to-edge is enabled.
-  // 2. `react-native-edge-to-edge` applies edge-to-edge in `onHostResume` and has no property to disable this behavior.
-  const shouldAutolinkEdgeToEdge =
-    platform === 'android' &&
-    getExpoVersion(packageJson) >= 53 &&
-    hasEnabledEdgeToEdge(config.exp) &&
-    !dependencies.includes('react-native-edge-to-edge');
-
-  // Edge-to-egde is a dependency of expo for versions >= 53, so it's a transitive dependency for the project, but is a not an expo module,
-  // so it won't be autolinked. We will try to find it in the search paths and autolink it.
-  if (shouldAutolinkEdgeToEdge) {
-    dependencies.push('react-native-edge-to-edge');
-  }
 
   const results: Record<string, string> = {};
   // `searchPathSet` can be mutated to discover all "isolated modules groups", when using isolated modules
@@ -244,10 +232,13 @@ export async function resolveAppProjectConfigAsync(
 }
 
 /**
- * Extracts the major version number from the 'expo' dependency string.
- *
- * @returns The major version number or 0.
+ * Resolve the `expo.edgeToEdgeEnabled` property from the `gradle.properties` file.
  */
-function getExpoVersion(packageJson: { dependencies?: { expo?: string } }): number {
-  return +(packageJson?.dependencies?.expo?.match(/\d+/)?.[0] ?? '0');
+async function resolveGradleEdgeToEdgeEnabled(projectRoot: string): Promise<boolean> {
+  return (
+    (await resolveGradlePropertyAsync(
+      path.join(projectRoot, 'android'),
+      EDGE_TO_EDGE_ENABLED_GRADLE_PROPERTY_KEY
+    )) === 'true'
+  );
 }
