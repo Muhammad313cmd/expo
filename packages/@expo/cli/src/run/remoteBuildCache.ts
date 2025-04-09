@@ -61,6 +61,47 @@ export async function resolveRemoteBuildCache(
   return null;
 }
 
+export async function uploadRemoteBuildCache(
+  projectRoot: string,
+  {
+    platform,
+    provider,
+  }: {
+    platform: ModPlatform;
+    provider?: Required<Required<ExpoConfig>['experiments']>['remoteBuildCache']['provider'];
+  }
+): Promise<string | null> {
+  const Fingerprint = importFingerprintForDev(projectRoot);
+  if (!Fingerprint) {
+    debug('@expo/fingerprint is not installed in the project, skip checking for remote builds');
+    return null;
+  }
+  const fingerprint = await Fingerprint.createFingerprintAsync(projectRoot);
+
+  if (provider === 'eas') {
+    const easJsonPath = path.join(projectRoot, 'eas.json');
+    if (!fs.existsSync(easJsonPath)) {
+      debug('eas.json not found, skip checking for remote builds');
+      return null;
+    }
+
+    try {
+      await spawnAsync(
+        'npx',
+        ['eas-cli', 'upload', `--platform=${platform}`, `--fingerprint=${fingerprint.hash}`],
+        {
+          cwd: projectRoot,
+        }
+      );
+    } catch (error) {
+      debug('eas-cli error:', error);
+      return null;
+    }
+  }
+
+  return null;
+}
+
 function importFingerprintForDev(projectRoot: string): null | typeof import('@expo/fingerprint') {
   try {
     return require(require.resolve('@expo/fingerprint', { paths: [projectRoot] }));
